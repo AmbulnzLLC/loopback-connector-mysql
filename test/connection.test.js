@@ -1,15 +1,46 @@
+// Copyright IBM Corp. 2013,2016. All Rights Reserved.
+// Node module: loopback-connector-mysql
+// This file is licensed under the MIT License.
+// License text available at https://opensource.org/licenses/MIT
+
 require('./init.js');
 var assert = require('assert');
+var should = require('should');
+var DataSource = require('loopback-datasource-juggler').DataSource;
+var mysqlConnector = require('../');
+var url = require('url');
 
-var db, DummyModel, odb;
+var db, DummyModel, odb, config;
 
 describe('connections', function () {
 
   before(function () {
     require('./init.js');
 
+    config = global.getConfig();
+
     odb = getDataSource({collation: 'utf8_general_ci', createDatabase: true});
     db = odb;
+  });
+
+  it('should pass with valid settings', function (done) {
+    var db = new DataSource(mysqlConnector, config);
+    db.ping(done);
+  });
+
+  it('ignores all other settings when url is present', function (done) {
+    var formatedUrl = generateURL(config);
+    var dbConfig = {
+      url: formatedUrl,
+      host: 'invalid-hostname',
+      port: 80,
+      database: 'invalid-database',
+      username: 'invalid-username',
+      password: 'invalid-password',
+    };
+
+    var db = new DataSource(mysqlConnector, dbConfig);
+    db.ping(done);
   });
 
   it('should use utf8 charset', function (done) {
@@ -42,6 +73,39 @@ describe('connections', function () {
   it('should drop db and disconnect all', function (done) {
     db.connector.execute('DROP DATABASE IF EXISTS ' + db.settings.database, function (err) {
       db.disconnect(function () {
+        done();
+      });
+    });
+  });
+
+  describe('lazyConnect', function() {
+    it('should skip connect phase (lazyConnect = true)', function(done) {
+      var dbConfig = {
+        host: '127.0.0.1',
+        port: 4,
+        lazyConnect: true,
+      };
+      var ds = new DataSource(mysqlConnector, dbConfig);
+
+      var errTimeout = setTimeout(function() {
+        done();
+      }, 2000);
+      ds.on('error', function(err) {
+        clearTimeout(errTimeout);
+        done(err);
+      });
+    });
+
+    it('should report connection error (lazyConnect = false)', function(done) {
+      var dbConfig = {
+        host: '127.0.0.1',
+        port: 4,
+        lazyConnect: false,
+      };
+      var ds = new DataSource(mysqlConnector, dbConfig);
+
+      ds.on('error', function(err) {
+        err.message.should.containEql('ECONNREFUSED');
         done();
       });
     });
@@ -103,6 +167,17 @@ var query = function (sql, cb) {
   odb.connector.execute(sql, cb);
 };
 
+function generateURL(config) {
+  var urlObj = {
+    protocol: 'mysql',
+    auth: config.username + ':' + config.password,
+    hostname: config.host,
+    pathname: config.database,
+    slashes: true
+  };
+  var formatedUrl = url.format(urlObj);
+  return formatedUrl;
+}
 
 
 
